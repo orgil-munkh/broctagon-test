@@ -1,0 +1,42 @@
+# Development files
+server.js
+test-*.js
+test-integration.js
+test-server.js
+
+# Logs
+logs/
+*.log
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Dependencies
+node_modules/
+
+# Git
+.git/
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+TESTING.md
+DEPLOYMENT.md
+
+# Development scripts
+package-lock.json
+yarn.lock

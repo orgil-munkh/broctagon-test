@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/pay/url",
+      "dest": "/api/pay/url.js"
+    },
+    {
+      "src": "/api/pay/callback",
+      "dest": "/api/pay/callback.js"
+    },
+    {
+      "src": "/health",
+      "dest": "/api/health.js"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 10
+    }
+  }
+}

@@ -1,0 +1,171 @@
+---
+alwaysApply: true
+// --- Next.js API route: /pages/api/pay/url.ts ---
+import { v4 as uuidv4 } from 'uuid';
+
+const CRM_PAY_TOKEN_EXPECTED = process.env.CRM_PAY_TOKEN ?? '';
+const PSP_SANDBOX_MODE = process.env.PSP_SANDBOX_MODE === 'true';
+const PSP_PAYMENT_BASE_URL = process.env.PSP_PAYMENT_BASE_URL ?? 'https://mock-psp.pay/url/';
+const LOG_PREFIX = '[pay/url]';
+
+// Utility to log output
+const log = (...args: any[]) => console.log(LOG_PREFIX, ...args);
+
+// Simulate PSP payment url creation (replace with real PSP SDK/integration)
+const createPspPaymentUrl = async ({
+  amount, currency, order_id, client_id, return_url, metadata,
+}: {
+  amount: number,
+  currency: string,
+  order_id: string,
+  client_id: string,
+  return_url?: string,
+  metadata?: Record<string, any>
+}): Promise<string> => {
+  // In production, call PSP API and pass params
+  if (PSP_SANDBOX_MODE) {
+    // Simulated mock payment URL, pass info for testing
+    const params = new URLSearchParams({
+      order_id,
+      amount: amount.toString(),
+      currency,
+      client_id,
+      ...(return_url ? { return_url } : {}),
+    }).toString();
+    return `${PSP_PAYMENT_BASE_URL}?${params}`;
+  }
+  // Place for real PSP integration
+  throw new Error('PSP integration not implemented.');
+};
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  try {
+    const crmPayToken = req.headers['crm-pay-token'] || req.headers['Crm-Pay-Token'];
+    if (crmPayToken !== CRM_PAY_TOKEN_EXPECTED) {
+      log('Invalid crm-pay-token:', crmPayToken);
+      return res.status(401).json({ error: 'Unauthorized: Invalid token.' });
+    }
+
+    const { amount, currency, client_id, return_url, metadata } = req.body || {};
+
+    if (!amount || !currency || !client_id) {
+      return res.status(400).json({ error: 'Missing required parameters.' });
+    }
+
+    const order_id = uuidv4();
+
+    const payment_url = await createPspPaymentUrl({
+      amount,
+      currency,
+      order_id,
+      client_id,
+      return_url,
+      metadata,
+    });
+
+    log(`Payment URL generated for order_id=${order_id}, client_id=${client_id}`);
+    return res.status(200).json({ payment_url, order_id });
+
+  } catch (err) {
+    log('Error generating payment url:', err?.message, err);
+    return res.status(500).json({ error: 'Internal Server Error.' });
+  }
+}
+
+// --- Next.js API route: /pages/api/pay/callback.ts ---
+const CRM_CALLBACK_URL = process.env.CRM_CALLBACK_URL;
+const CRM_PAY_TOKEN = process.env.CRM_PAY_TOKEN;
+const PSP_SIGNATURE_HEADER = 'x-psp-signature';
+const LOG_PREFIX_CB = '[pay/callback]';
+
+// Simulate PSP webhook signature verification (in production implement real verification)
+const verifyPspSignature = (req) => {
+  // For now, always return true -- in real case, check signature from req.headers[PSP_SIGNATURE_HEADER]
+  return true;
+};
+
+// Map PSP's webhook payload to CRM format
+const mapPspToCrmPayload = (pspPayload) => {
+  // Example mapping, adjust as per actual PSP fields
+  return {
+    amount: pspPayload.amount,
+    currency: pspPayload.currency || 'USD',
+    status: pspPayload.status, // e.g., 'success', 'failed'
+    merchant_reference: pspPayload.order_id,
+    transaction_id: pspPayload.psp_transaction_id || pspPayload.transaction_id,
+    client_id: pspPayload.client_id,
+    ...(pspPayload.exchange_rate ? { exchange_rate: pspPayload.exchange_rate } : {})
+  };
+};
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  try {
+    // Optional: Verify PSP signature
+    if (!verifyPspSignature(req)) {
+      return res.status(401).json({ error: 'Invalid PSP signature.' });
+    }
+
+    const pspPayload = req.body;
+
+    // Map to CRM format
+    const crmPayload = mapPspToCrmPayload(pspPayload);
+
+    // POST to Broctagon CRM callback endpoint
+    const crmCallbackEndpoint = `${CRM_CALLBACK_URL}/pay/callback`;
+    const crmResponse = await fetch(crmCallbackEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'crm-pay-token': CRM_PAY_TOKEN,
+      },
+      body: JSON.stringify(crmPayload),
+    });
+
+    if (!crmResponse.ok) {
+      const errorText = await crmResponse.text();
+      console.error(LOG_PREFIX_CB, 'CRM callback failed:', crmCallbackEndpoint, errorText);
+      return res.status(502).json({ error: 'Failed to notify CRM', detail: errorText });
+    }
+
+    console.log(LOG_PREFIX_CB, 'Successfully notified CRM for order_id:', crmPayload.merchant_reference);
+    return res.status(200).json({ status: 'success' });
+
+  } catch (err) {
+    console.error(LOG_PREFIX_CB, 'Error handling PSP callback:', err?.message, err);
+    return res.status(500).json({ error: 'Internal Server Error.' });
+  }
+}
+
+// --- .env.example (create as .env.local for local testing) ---
+// CRM_PAY_TOKEN=changeme
+// CRM_CALLBACK_URL=https://crm.example.com/api
+// PSP_PAYMENT_BASE_URL=https://mock-psp.pay/url/
+// PSP_SANDBOX_MODE=true
+
+// --- Test payload example for /api/pay/url ---
+// curl -X POST http://localhost:3000/api/pay/url \
+//   -H 'Content-Type: application/json' \
+//   -H 'crm-pay-token: changeme' \
+//   -d '{"amount":100,"currency":"USD","client_id":"broker123","return_url":"https://your.return.url","metadata":{"order_note":"Demo"}}'
+
+// --- Test payload example for /api/pay/callback ---
+// curl -X POST http://localhost:3000/api/pay/callback \
+//   -H 'Content-Type: application/json' \
+//   -d '{
+//         "order_id": "test-order-id-001",
+//         "amount": 100,
+//         "currency": "USD",
+//         "psp_transaction_id": "tx9981",
+//         "status": "success",
+//         "client_id": "broker123",
+//         "exchange_rate": 1
+//       }'
+
